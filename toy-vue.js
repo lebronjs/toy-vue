@@ -8,15 +8,15 @@ class ToyVue {
         this.template = document.querySelector(config.el);
         this.dep = new Dep();
         this.data = reactive(config.data, this.dep);
-        this.traverse(this.template);
+        this.traverseCompile(this.template);
     }
-    traverse(node) {
+    traverseCompile(node) {
         if (node.nodeType === Node.TEXT_NODE) {
             if (node.textContent.trim().match(/^{{([\s\S]+)}}$/)) {
                 const dataName = RegExp.$1.trim();
-                this.dep.subscribe(dataName, () => {
-                    node.textContent = this.data[dataName];
-                });
+                // 添加订阅者
+                Watcher.target = new Watcher(() => (node.textContent = this.data[dataName]));
+                // 初始化
                 node.textContent = this.data[dataName];
             }
         }
@@ -24,9 +24,9 @@ class ToyVue {
             for (const attribute of node.attributes) {
                 if (attribute.name === 'v-model') {
                     const dataName = attribute.value;
-                    this.dep.subscribe(dataName, () => {
-                        node.value = this.data[dataName];
-                    });
+                    // 添加订阅者
+                    Watcher.target = new Watcher(() => (node.value = this.data[dataName]));
+                    // 初始化
                     node.value = this.data[dataName];
                     node.addEventListener('input', event => (this.data[dataName] = node.value));
                 }
@@ -34,7 +34,7 @@ class ToyVue {
         }
         if (node.childNodes && node.childNodes.length) {
             for (const childNode of node.childNodes) {
-                this.traverse(childNode);
+                this.traverseCompile(childNode);
             }
         }
     }
@@ -42,30 +42,43 @@ class ToyVue {
 
 class Dep {
     constructor() {
-        this.subs = new Map();
+        this.subsMap = new Map();
         this.currentSub = null;
     }
     // 订阅依赖
     subscribe(key, value) {
-        if (!this.subs.get(key)) {
-            this.subs.set(key, []);
+        if (!this.subsMap.get(key)) {
+            this.subsMap.set(key, []);
         }
-        this.subs.get(key).push(value);
+        this.subsMap.get(key).push(value);
     }
     // 通知依赖
     notify(key) {
-        for (const subFunc of this.subs.get(key)) {
-            subFunc();
+        for (const sub of this.subsMap.get(key)) {
+            sub.update();
         }
+    }
+}
+
+class Watcher {
+    static target = null;
+    constructor(cb) {
+        this.callBack = cb;
+    }
+    update() {
+        this.callBack();
     }
 }
 
 const reactive = function (object, dep) {
     const observed = new Proxy(object, {
         get(target, propKey, receiver) {
+            Watcher.target && dep.subscribe(propKey, Watcher.target);
+            Watcher.target = null;
             return target[propKey];
         },
         set(target, propKey, value, receiver) {
+            if (value === target[propKey]) return;
             target[propKey] = value;
             dep.notify(propKey);
             return true;
